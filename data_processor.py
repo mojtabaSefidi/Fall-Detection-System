@@ -27,7 +27,7 @@ class DatasetProcessor():
     test = []
     for data in dataset:
       if len(data) == 1:
-        if random.randint(1,100)>=81:
+        if random.randint(1,100)>=ratio:
           test.extend(data)
         else:
           train.extend(data)
@@ -112,6 +112,11 @@ class DatasetProcessor():
     feature = np.roll((np.roll(feature, -1, axis=0) - feature), 1, axis=0)
     feature[0] = 0
     return feature, label.ravel()
+
+  def normalizer(self, scaler, X_train, X_test):
+    X_train = scaler.fit_transform(X_train.reshape(-1, X_train.shape[-1])).reshape(X_train.shape)
+    X_test = scaler.transform(X_test.reshape(-1, X_test.shape[-1])).reshape(X_test.shape)
+    return X_train, X_test
 
   def generate_class_weight(self, label):
     class_weights = compute_class_weight(class_weight = "balanced",
