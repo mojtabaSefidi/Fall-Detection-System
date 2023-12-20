@@ -13,7 +13,7 @@
 5. Run the cells
 
 ## How to find the dataset?
-1. The SisFall Dataset (features)
+1. The SisFall Dataset
 ```
 !gdown -q 1-E-TLd5_J-DDWZXkuYL-moMpoezlMn4Z
 ```
