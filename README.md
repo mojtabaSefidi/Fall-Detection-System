@@ -49,4 +49,4 @@
 * Main Interface of our project
 * Output: A data frame including the detailed results
 
-#### Feel free to contact me for probable issues and problems
+#### Feel free to contact me for any possible issues.
