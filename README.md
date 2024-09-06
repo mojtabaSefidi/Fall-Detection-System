@@ -48,26 +48,38 @@ The SisFall dataset is designed to support research in fall detection, with a pa
 
 ## Implementation Details
 
-### `data_processor.py`
+#### `data_processor.py`
 * **Objective:** Process the dataset and convert it into time-series format.
 * **Input:** SisFall dataset.
 * **Output:** `X_train`, `y_train`, `X_test`, `y_test`.
 
-### `deep_models.py`
+#### `deep_models.py`
 * **Objective:** Implementation and evaluation of deep learning models.
 * **Output:** Separate dictionaries containing results and predictions.
 
-### `traditional_models.py`
+#### `traditional_models.py`
 * **Objective:** Implementation and evaluation of traditional machine learning models.
 * **Output:** Separate dictionaries containing results and predictions.
 
-### `utils.py`
+#### `utils.py`
 * **Objective:** Collection of utility functions used throughout the project.
 
-### `Main.ipynb`
+#### `Main.ipynb`
 * **Main Interface:** Provides the main interface for the project.
 * **Output:** A data frame with detailed results.
 
+### Citation
+For more details, you can read our publicly available paper:
+
+```
+@article{EsfahaniFallDetection2023,
+  title={Comparative Study on Performance of ML Models for Fall Detection in Older People},
+  author={Mohammadali Sefidi Esfahani and Mohammad Fattahian},
+  journal={Preprints.org},
+  year={2023},
+  doi={https://doi.org/10.20944/preprints202312.2027.v1}
+}
+```
 ---
 
 Feel free to contact me for any questions or issues.
