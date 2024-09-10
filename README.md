@@ -1,6 +1,6 @@
 # Fall Detection System
 
-**Official Implementation of "Comparative Study on Performance of ML Models for Fall Detection in Older People"**
+**Official Implementation of "[Comparative Study on Performance of ML Models for Fall Detection in Older People](https://doi.org/10.20944/preprints202312.2027.v1)"**
 
 ## Introduction
 Fall detection among the elderly is a crucial issue in healthcare due to the high risk of injury and related complications. Falls are a leading cause of hospitalizations and long-term disabilities in older adults, making early and accurate detection vital for timely intervention. With advancements in wearable technology and machine learning, automated fall detection systems can help monitor and safeguard the elderly, offering both autonomy and security.
