@@ -72,7 +72,7 @@ The SisFall dataset is designed to support research in fall detection, with a pa
 For more details, you can read our publicly available paper:
 
 ```
-@article{EsfahaniFallDetection2023,
+@article{Esfahani2023FallDetection,
   title={Comparative Study on Performance of ML Models for Fall Detection in Older People},
   author={Mohammadali Sefidi Esfahani and Mohammad Fattahian},
   journal={Preprints.org},
