@@ -49,7 +49,7 @@ The SisFall dataset is designed to support fall detection research, focusing on 
 ## Implementation Details
 
 #### `data_processor.py`
-* **Objective:** Process the dataset and convert it into time-series format.
+* **Objective:** Process the dataset and convert it into a time-series format.
 * **Input:** SisFall dataset.
 * **Output:** `X_train`, `y_train`, `X_test`, `y_test`.
 
@@ -72,12 +72,12 @@ The SisFall dataset is designed to support fall detection research, focusing on 
 For more details, you can read our publicly available paper:
 
 ```
-@article{Esfahani2023FallDetection,
+@article{Esfahani2025FallDetection,
   title={Comparative Study on Performance of ML Models for Fall Detection in Older People},
   author={Mohammadali Sefidi Esfahani and Mohammad Fattahian},
-  journal={Preprints.org},
-  year={2023},
-  doi={https://doi.org/10.20944/preprints202312.2027.v1}
+  journal={Journal of Artificial Intelligence, Virtual Reality, and Human-Centered Computing},
+  year={2025},
+  pages={1-5}
 }
 ```
 ---
