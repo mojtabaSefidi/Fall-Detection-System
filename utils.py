@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from tensorflow import keras
 import seaborn as sn
 import pandas as pd
+import numpy as np
 import pickle
 sn.set()
 
@@ -26,37 +27,29 @@ def plot_confusion_matrix(confusion_matrix, title='', cmap ='Greens'):
 
 def plot_precision_recall_curve(actual_labels, prediction, title='', model_name='', file_name=None):
     precision, recall, thresholds=precision_recall_curve(actual_labels, prediction)
-    plt.figure(figsize=(8,6))
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(8,6))
     ax.plot(recall, precision, label='Model: {model_name}'.format(model_name=model_name), color='purple')
 
     # add axis labels to plot
-    if title == '':
-        plt.title(title)
-    else:
-        plt.title('Precision-Recall Curve')
+    plt.title(title or 'Precision-Recall Curve')
     ax.set_ylabel('Precision')
     ax.set_xlabel('Recall')
 
     # display plot
-    plt.show()
     if file_name is not None:
         plt.savefig(file_name)
+    plt.show()
 
 def plot_roc_curve(actual_labels, prediction, title='', model_name='', file_name=None):
     fpr, tpr, _ = roc_curve(actual_labels, prediction)
     plt.figure(figsize=(8,6))
     plt.plot(fpr, tpr, label='Model: {model_name}'.format(model_name=model_name), color='blue')
-    if title == '':
-        plt.title(title)
-    else:
-        plt.title('ROC Learning Curves')
+    plt.title(title or 'ROC Learning Curves')
     plt.xlabel('false positive rate')
     plt.ylabel('true positive rate')
-    plt.show()
-
     if file_name is not None:
         plt.savefig(file_name)
+    plt.show()
 
 def plot_metrics(history):
     metrics = ['loss', 'PRC', 'Precision', 'Recall']
@@ -70,28 +63,24 @@ def plot_metrics(history):
              color=colors[0], linestyle="--", label='Val')
         plt.xlabel('Epoch')
         plt.ylabel(name)
-    if metric == 'loss':
-        plt.ylim([0, plt.ylim()[1]])
-    elif metric == 'auc':
-        plt.ylim([0.8,1])
-    else:
-        plt.ylim([0,1])
-
-    plt.legend()
+        if metric == 'loss':
+            plt.ylim([0, plt.ylim()[1]])
+        elif metric.lower() == 'auc':
+            plt.ylim([0.8,1])
+        else:
+            plt.ylim([0,1])
+        plt.legend()
 
 def plot_auc_curve(actual_labels, prediction, title='', model_name='', file_name = None):
     fpr, tpr, _ = roc_curve(actual_labels,  prediction)
     auc = roc_auc_score(actual_labels, prediction).round(4)
     plt.figure(figsize=(8,6))
-    if title == '':
-        plt.title(title)
-    else:
-        plt.title('AUC Learning Curves')
+    plt.title(title or 'AUC Learning Curves')
     plt.plot(fpr,tpr, label='Model: '+ model_name + ", AUC=" + str(auc), color='red')
     plt.legend(loc=4)
-    plt.show()
     if file_name is not None:
         plt.savefig(file_name)
+    plt.show()
 
 def plot_history(history):
 

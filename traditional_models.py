@@ -1,4 +1,5 @@
 from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.tree import DecisionTreeClassifier
 from utils import *
 import numpy as np
 
@@ -8,12 +9,12 @@ class Traditional_Models():
   def __init__(self,
                models,
                model_parameters,
-               predictions={},
-               results={}):
+               predictions=None,
+               results=None):
     self.models = models
     self.model_parameters = model_parameters
-    self.predictions = predictions
-    self.results = results
+    self.predictions = {} if predictions is None else predictions
+    self.results = {} if results is None else results
 
   def __validation(self, X_train, y_train, validation_size=0.35):
     _, X_validation, _, y_validation = train_test_split(X_train, y_train, test_size=validation_size, stratify=y_train)
@@ -49,7 +50,7 @@ class Traditional_Models():
                X_test,
                y_test,
                class_weight,
-               validation_size=35,
+               validation_size=0.35,
                number_features=64,
                tuning_metric='f1_macro'):
     print('1) Reducing dimension of feature matrices...')
@@ -65,6 +66,6 @@ class Traditional_Models():
       print()
       if model_name in self.model_parameters:
         model = self.__parameter_tuning(model, self.model_parameters[model_name], X_validation, y_validation, scoring=tuning_metric)
-      mdoel =  self.__train_model(model, X_train_flattened, y_train)
+      model = self.__train_model(model, X_train_flattened, y_train)
       self.predictions[model_name] = self.__evaluate(model, X_test_flattened, y_test, title=model_name)
     return self.predictions, self.results

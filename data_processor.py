@@ -15,9 +15,8 @@ class DatasetProcessor():
     allfiles = []
     allFolders = sorted(glob.glob(path + "*"))
     for files in allFolders:
-      allfiles.append(sorted(glob.glob(files+"/*.txt")))
-    if 'desktop.ini' in allfiles:
-          allfiles.remove('desktop.ini')
+      allfiles.append(sorted(file_path for file_path in glob.glob(files+"/*.txt")
+                             if os.path.basename(file_path).lower() != 'desktop.ini'))
 
     dataset = np.hstack(allfiles)
     start = dataset[0].rfind('/') + 1
@@ -27,7 +26,7 @@ class DatasetProcessor():
     test = []
     for data in dataset:
       if len(data) == 1:
-        if random.randint(1,100)>=ratio:
+        if random.random() >= ratio:
           test.extend(data)
         else:
           train.extend(data)
@@ -69,7 +68,7 @@ class DatasetProcessor():
       return np.round(new_dataset.to_numpy(), 2)
 
   def __get_label(self, data_path):
-    label = data_path[54]
+    label = os.path.basename(data_path)[0]
     if label =='D':
       return int(0)
     elif label =='F':
@@ -85,13 +84,14 @@ class DatasetProcessor():
       result[first_index : (first_index+len(feature))] = feature
       first_index += len(feature)
 
-    return result[result.sum(axis=1) != 0]
+    return result[:first_index]
 
   def windowing2d(self, dataset, window_size=200):
     window = window_size * (dataset.shape[1]-1)
     cut = dataset.shape[0] % window_size
-    feature = dataset[:-cut,0:-1]
-    label = dataset[:-cut,-1]
+    usable_size = dataset.shape[0] - cut
+    feature = dataset[:usable_size,0:-1]
+    label = dataset[:usable_size,-1]
     feature = feature.ravel().reshape(feature.size//window,window)
     label = label.reshape(label.size// window_size, window_size)
     label = label.sum(axis=1)
@@ -103,8 +103,9 @@ class DatasetProcessor():
   def windowing3d(self, dataset, window_size=200):
     n_windows = len(dataset) // window_size
     cut = dataset.shape[0] % window_size
-    feature = dataset[:-cut,0:-1]
-    label = dataset[:-cut,-1]
+    usable_size = dataset.shape[0] - cut
+    feature = dataset[:usable_size,0:-1]
+    label = dataset[:usable_size,-1]
     feature = feature.reshape(n_windows, window_size, dataset.shape[1]-1)
     label = label.reshape(n_windows, window_size, 1)
     label = label.sum(axis=1)
