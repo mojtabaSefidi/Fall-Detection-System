@@ -1,186 +1,135 @@
 # Fall Detection System
 
-**Official Implementation of "[Comparative Study on Performance of ML Models for Fall Detection in Older People](https://www.preprints.org/manuscript/202312.2027/download/final_file)"**
+Official implementation of [Comparative Study on Performance of ML Models for
+Fall Detection in Older People](https://www.preprints.org/manuscript/202312.2027/download/final_file).
 
-## Introduction
-Fall detection among the elderly is a crucial issue in healthcare due to the high risk of injury and related complications. Falls are a leading cause of hospitalizations and long-term disabilities in older adults, making early and accurate detection vital for timely intervention. With advancements in wearable technology and machine learning, automated fall detection systems can help monitor and safeguard the elderly, offering both autonomy and security.
+## Baseline objective
 
-The SisFall dataset was specifically developed to address this problem. It provides a rich source of sensor data collected from accelerometers and gyroscopes, enabling the development of effective fall detection systems. Various machine learning algorithms can be trained on this dataset to distinguish among normal activity, the pre-fall stage, and the fall stage, allowing for more informative automated monitoring and response.
+This repository provides a reproducible binary baseline for the SisFall dataset.
+Normal windows are label `0`; a window containing at least one pre-fall or fall
+sample is label `1`. The experiment compares fixed traditional baselines with one
+compact deep-learning baseline without feature engineering or hyperparameter
+search.
 
-## SisFall Dataset Overview
-The SisFall dataset is designed to support fall detection research, focusing on elderly individuals prone to falls. It includes simulated fall events and normal activities recorded using wearable sensors, such as accelerometers and gyroscopes. These sensors are worn on the subjects' bodies to capture movement data, enabling researchers to analyze the patterns associated with different activities.
+## Dataset
 
-### Key Characteristics of the SisFall Dataset:
+SisFall contains two accelerometers and one gyroscope sampled at 200 Hz. The nine
+input channels are retained: three axes from each sensor. The original directory
+provides sensor values and SisFall Enhanced provides sample labels.
 
-1. **Sensor Data:** The dataset includes raw time-series data from accelerometers and gyroscopes that record the body’s motion and orientation. These sensors are typically worn at the waist, providing an optimal balance between detecting upper and lower body movements.
+Only original recordings with a matching enhanced-label recording are used.
+Unmatched original files are reported and skipped; source files are never renamed
+or modified.
 
-2. **Falls and Activities:** The SisFall dataset contains data from a variety of simulated fall scenarios, such as:
-   * Forward falls
-   * Backward falls
-   * Sideways falls  
-   These events are simulated to represent the most common real-world falls in elderly individuals. Additionally, normal activities like walking, sitting, standing, and bending are included to help machine learning models differentiate between fall and non-fall actions.
+## Run the notebook
 
-3. **Subjects:** The dataset includes data from young and elderly participants, ensuring a diverse range of movement characteristics. This helps to generalize the models across different age groups and physical conditions, making them more applicable in real-world settings.
+1. Install the dependencies:
 
-4. **Sampling Rate:** The sensor data is collected at a high sampling rate, capturing detailed movement patterns. This enhances the accuracy of fall detection algorithms.
-
-## How to Run
-
-1. Install the required libraries from the `requirements.txt` file:
-   ```
+   ```bash
    pip install -r requirements.txt
    ```
-2. Download the dataset.
-3. Open `Main.ipynb`.
-4. Configure the dataset, enhanced-label, cache, and result paths in the configuration cell.
-5. Run the notebook cells.
 
-The notebook works locally or in a cloud notebook. Google Drive mounting is optional.
-Paths can be configured in the notebook or through these environment variables:
+2. Place the datasets under `data/SisFall_Dataset` and
+   `data/SisFall_Enhanced`, or configure their paths in `Main.ipynb`.
+3. Open `Main.ipynb` and run all cells from top to bottom.
 
-```
+Local and Colab paths can also be set through:
+
+```text
 SISFALL_DATASET_PATH
 SISFALL_ENHANCED_PATH
 SISFALL_CACHE_PATH
 SISFALL_RESULT_PATH
-SISFALL_EXPERIMENT
-SISFALL_SPLIT_PROTOCOL
-SISFALL_PREPROCESSING_MODE
-SISFALL_RANDOM_SEED
 SISFALL_N_JOBS
-SISFALL_BOOTSTRAP_ITERATIONS
-SISFALL_LOCAL_STAGE_PATH
 ```
 
-Versioned NumPy arrays are loaded before preprocessing unless `REPROCESS_DATA` is enabled.
-When preprocessing runs, the exact train/test recording assignment, fitted scaler,
-and traceable train/test window metadata are saved with the cached arrays. Set
-`SISFALL_N_JOBS` controls CPU parallelism for supported traditional models and
-hyperparameter searches; its default is `-1` (all available CPU cores). Caches
-and results are isolated by split protocol, preprocessing mode, window size, and
-random seed.
-On Colab or another environment with slow mounted storage, setting
-`SISFALL_LOCAL_STAGE_PATH` copies both dataset directories to that faster local
-directory once. It is disabled by default and is unnecessary on a local laptop.
+By default, the notebook keeps all generated data and results in memory and writes
+nothing to disk. Set `SAVE_ARTIFACTS = True` to enable the versioned preprocessing
+cache and save reports, plots, predictions, and manifests. Model persistence is a
+separate `SAVE_MODELS` option and is also disabled by default. When caching is
+enabled, set `REPROCESS_DATA = True` after changing the data or preprocessing.
 
-For the main comparison, use the notebook's `EXPERIMENT_NAME` setting:
+## Experimental protocol
 
-1. Run all cells with `primary_compatibility`.
-2. Restart the kernel.
-3. Run all cells with `primary_raw`.
+### Chronological trial split
 
-The final notebook cell combines completed runs in
-`experiment_comparison.csv`. The additional `subject_compatibility` and
-`subject_raw` presets run the separate subject-independent protocol. The same
-selection can be provided through `SISFALL_EXPERIMENT` without editing the
-notebook.
+The baseline evaluates later repetitions from known subjects. In every complete
+five-repetition subject/activity group, `R01–R04` are assigned to development and
+`R05` to testing. The latest development repetition is reserved for CNN
+validation, leaving the earlier trials for model fitting.
 
-### Experimental protocols
+Activities recorded once per subject cannot be divided chronologically. They are
+reproducibly stratified by activity, activity class, and age group. Windows from
+one recording never cross split boundaries. The notebook reports subject,
+activity, and binary-label coverage for every split.
 
-The default `stratified_trial` protocol evaluates unseen repetitions from known
-subjects. Every complete subject/activity group with five repetitions contributes
-four trials to training and one to testing. Single-trial recordings are balanced
-globally by activity and class. A fixed seed makes the assignment reproducible,
-and `split_manifest.csv` records the split and assignment reason for every trial.
-Model selection and deep-learning early stopping use a second fixed, trial-aware
-fit/validation assignment created only from the training recordings. Its exact
-membership is stored in `validation_manifest.csv`; test recordings are never used
-for validation.
+### Binary raw windows
 
-The optional `subject_independent` protocol assigns each subject entirely to one
-side of the split. It is stored and reported separately because it answers a
-different question. Select it with:
+Each recording is independently divided into non-overlapping one-second windows
+of 200 samples. Incomplete tails are dropped. Window targets are:
 
-```
-SISFALL_SPLIT_PROTOCOL=subject_independent
-```
+- `0`: every sample is normal.
+- `1`: at least one sample is pre-fall (`2`) or fall (`1`).
 
-## Three-class preprocessing
+No channel selection, handcrafted feature extraction, difference transformation,
+or window-level resampling is applied.
 
-The enhanced labels are preserved as three model targets:
+### Scaling
 
-* `0`: no fall
-* `2`: pre-fall
-* `1`: fall
+A `StandardScaler` fits one independent mean and standard deviation for each of
+the nine channels using fit-trial samples only. The same fitted statistics are
+applied to validation and test samples. Test data never influence scaling.
 
-Each recording is windowed independently into non-overlapping one-second windows
-(200 samples at 200 Hz), so no window can cross a trial boundary. Incomplete tails
-are dropped. A window containing event samples is assigned its dominant non-zero
-stage; a tie is assigned to fall. Window composition, event position, and source
-location are available in `train_window_metadata.csv` and
-`test_window_metadata.csv`.
+### Class imbalance
 
-Two preprocessing modes are available without changing the model families:
+Learned models use balanced class weights. Training windows are not duplicated,
+and validation and test distributions remain unchanged.
 
-* `previous_window_difference` (default) preserves the original representation by
-  calculating the current window minus its preceding window at corresponding
-  sample positions. The transform is reset at trial boundaries.
-* `raw_windows` uses normalized sensor windows without the difference transform.
+## Models
 
-Run the corrected raw-window experiment separately with:
+The fixed traditional set contains:
 
-```
-SISFALL_PREPROCESSING_MODE=raw_windows
-```
+- Majority-class dummy reference
+- Linear logistic classifier trained with stochastic gradient descent
+- Random forest
 
-### Focused reporting
+KNN is excluded because flattened time-series windows are high-dimensional,
+prediction is comparatively expensive, and KNN has no native class weighting.
 
-The final analysis saves one compact model table, one overlaid fall
-precision–recall plot, one metric comparison, and combined confusion matrices with
-counts and row percentages. CSV reports cover per-activity false positives,
-per-fall-type false negatives, per-subject performance, window composition,
-false alarms per ADL hour, runtime, model size, and trial-clustered bootstrap
-confidence intervals.
+The deep baseline is one compact 1D CNN with two convolution blocks, global
+average pooling, and a small dense classifier. It uses Adam, binary
+cross-entropy, balanced class weights, and early stopping on validation PR-AUC.
 
-## How to Access the Dataset
+## Evaluation
 
-1. **SisFall Dataset:**
-   ```
-   !gdown -q 1-E-TLd5_J-DDWZXkuYL-moMpoezlMn4Z
-   ```
-2. **SisFall Enhanced Dataset (Labels):**
-   ```
-   !gdown -q 1gvOuxPc8dNgTnxuvPcVuCKifOf98-TV0
-   ```
+The notebook reports only standard binary outcomes:
 
-## Implementation Details
+- Accuracy and balanced accuracy
+- Positive-class precision, recall, and F1
+- ROC-AUC and PR-AUC
+- Classification reports
+- Confusion matrices with counts and row percentages
+- Overlaid ROC and precision–recall curves
+- CNN training and validation curves
+- Training and inference time
 
-#### `data_processor.py`
-* **Objective:** Process the dataset and convert it into a time-series format.
-* **Input:** SisFall dataset.
-* **Output:** Three-class `X_train`, `y_train`, `X_test`, `y_test`, plus per-window metadata.
+Predictions, probability scores, reports, plots, split manifests, fitted models,
+and the run configuration are saved under the configured result directory.
 
-#### `deep_models.py`
-* **Objective:** Implementation and evaluation of deep learning models.
-* **Output:** Separate dictionaries containing results and predictions.
+## Project structure
 
-#### `traditional_models.py`
-* **Objective:** Implementation and evaluation of traditional machine learning models.
-* **Output:** Separate dictionaries containing results and predictions.
+- `Main.ipynb`: presentation-oriented experiment runner.
+- `dataset_analysis.py`: dataset indexing, pairing, summaries, and trial plots.
+- `splitting_protocols.py`: reproducible trial-level assignments.
+- `data_processor.py`: sensor parsing, binary windowing, and metadata.
+- `baseline_pipeline.py`: caching and train-only channel scaling.
+- `baseline_models.py`: traditional baselines and compact 1D CNN.
+- `baseline_evaluation.py`: binary metrics, reports, and plots.
+- `experiment_utils.py`: lightweight logging, timing, and run manifests.
 
-#### `utils.py`
-* **Objective:** Collection of utility functions used throughout the project.
+## Citation
 
-#### `dataset_analysis.py`
-* **Objective:** Build the dataset index, validate sensor-label pairs, summarize dataset coverage, and visualize one fall trial across all nine sensor channels.
-
-#### `splitting_protocols.py`
-* **Objective:** Create, validate, and summarize reproducible trial-based or subject-independent recording assignments.
-
-#### `evaluation_analysis.py`
-* **Objective:** Produce focused metrics, error analysis, confidence intervals, and non-repetitive comparison plots.
-
-#### `experiment_utils.py`
-* **Objective:** Lightweight stage timing, platform information, logging, and run-manifest export.
-
-#### `Main.ipynb`
-* **Main Interface:** Provides the main interface for the project.
-* **Output:** A data frame with detailed results.
-
-### Citation
-For more details, you can read our publicly available paper:
-
-```
+```bibtex
 @article{Esfahani2025FallDetection,
   title={Comparative Study on Performance of ML Models for Fall Detection in Older People},
   author={Mohammadali Sefidi Esfahani and Mohammad Fattahian},
@@ -189,8 +138,3 @@ For more details, you can read our publicly available paper:
   pages={1-5}
 }
 ```
----
-
-Feel free to contact me for any questions or issues.
-
---- 

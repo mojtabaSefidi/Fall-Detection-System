@@ -5,8 +5,10 @@ import pandas as pd
 
 
 TRIAL_PROTOCOL = 'stratified_trial'
+CHRONOLOGICAL_TRIAL_PROTOCOL = 'chronological_trial'
 SUBJECT_PROTOCOL = 'subject_independent'
-SUPPORTED_PROTOCOLS = {TRIAL_PROTOCOL, SUBJECT_PROTOCOL}
+SUPPORTED_PROTOCOLS = {
+    TRIAL_PROTOCOL, CHRONOLOGICAL_TRIAL_PROTOCOL, SUBJECT_PROTOCOL}
 VALIDATION_PROTOCOL = 'trial_aware_validation'
 
 
@@ -83,6 +85,67 @@ def stratified_trial_split(dataset_index, train_ratio=0.8, seed=42):
   return manifest
 
 
+def chronological_trial_split(dataset_index, train_ratio=0.8, seed=42):
+  """Split repeated trials chronologically within each subject/activity.
+
+  Earlier repetitions are assigned to training and the latest repetition(s) to
+  testing. Activities recorded once per subject cannot be split chronologically,
+  so those recordings are reproducibly stratified by activity, activity class,
+  and age group. This preserves trial boundaries and keeps both age groups and
+  activity classes represented without allowing windows from one trial to leak
+  across splits.
+  """
+  manifest = _prepare_manifest(
+      dataset_index, CHRONOLOGICAL_TRIAL_PROTOCOL, seed)
+  rng = np.random.default_rng(seed)
+  singleton_indices = []
+
+  for _, group in manifest.groupby(['subject', 'activity'], sort=True):
+    group = group.sort_values(['trial', 'trial_stem'])
+    indices = group.index.to_numpy()
+    if len(indices) == 1:
+      singleton_indices.extend(indices)
+      continue
+
+    n_test = max(1, round(len(indices) * (1 - train_ratio)))
+    n_test = min(n_test, len(indices) - 1)
+    train_indices = indices[:-n_test]
+    test_indices = indices[-n_test:]
+    manifest.loc[train_indices, ['split', 'assignment_reason']] = [
+        'train', 'earlier within-subject/activity repetition']
+    manifest.loc[test_indices, ['split', 'assignment_reason']] = [
+        'test', 'latest within-subject/activity repetition']
+
+  singleton_rows = manifest.loc[singleton_indices]
+  strata = ['activity', 'activity_type']
+  if 'age_group' in singleton_rows.columns:
+    strata.append('age_group')
+  for _, group in singleton_rows.groupby(strata, sort=True):
+    indices = group.sort_values(['subject', 'trial_stem']).index.to_numpy()
+    shuffled = rng.permutation(indices)
+    if len(indices) == 1:
+      current_test_fraction = manifest['split'].eq('test').mean()
+      n_test = int(current_test_fraction < (1 - train_ratio))
+    else:
+      n_test = max(1, round(len(indices) * (1 - train_ratio)))
+      n_test = min(n_test, len(indices) - 1)
+    test_indices = shuffled[:n_test]
+    train_indices = shuffled[n_test:]
+    manifest.loc[train_indices, ['split', 'assignment_reason']] = [
+        'train', 'singleton stratified by activity/class/age group']
+    manifest.loc[test_indices, ['split', 'assignment_reason']] = [
+        'test', 'singleton stratified by activity/class/age group']
+
+  validate_split_manifest(manifest)
+  five_trial_counts = (manifest[manifest['subject_activity_trial_count'].eq(5)]
+      .groupby(['subject', 'activity'])['split'].value_counts().unstack(fill_value=0))
+  if not five_trial_counts.empty:
+    if not ((five_trial_counts.get('train', 0) == 4) &
+            (five_trial_counts.get('test', 0) == 1)).all():
+      raise ValueError('The chronological 4-train/1-test rule failed')
+  return manifest
+
+
 def subject_independent_split(dataset_index, train_ratio=0.8, seed=42,
                               candidate_splits=500):
   """Choose a fixed, disjoint subject split with useful activity coverage."""
@@ -124,6 +187,9 @@ def create_split_manifest(dataset_index, protocol=TRIAL_PROTOCOL,
                           train_ratio=0.8, seed=42):
   if protocol == TRIAL_PROTOCOL:
     return stratified_trial_split(dataset_index, train_ratio=train_ratio, seed=seed)
+  if protocol == CHRONOLOGICAL_TRIAL_PROTOCOL:
+    return chronological_trial_split(
+        dataset_index, train_ratio=train_ratio, seed=seed)
   if protocol == SUBJECT_PROTOCOL:
     return subject_independent_split(dataset_index, train_ratio=train_ratio, seed=seed)
   raise ValueError(
@@ -165,14 +231,18 @@ def paths_from_manifest(manifest):
 def create_validation_manifest(split_manifest, train_ratio=0.8, seed=43):
   """Create a trial-aware fit/validation split only from training recordings."""
   training_recordings = split_manifest[split_manifest['split'].eq('train')].copy()
-  validation_manifest = stratified_trial_split(
+  parent_protocol = split_manifest['split_protocol'].iloc[0]
+  splitter = (chronological_trial_split
+              if parent_protocol == CHRONOLOGICAL_TRIAL_PROTOCOL
+              else stratified_trial_split)
+  validation_manifest = splitter(
       training_recordings, train_ratio=train_ratio, seed=seed)
   validation_manifest['split'] = validation_manifest['split'].replace({
       'train': 'fit', 'test': 'validation'})
   validation_manifest['split_protocol'] = VALIDATION_PROTOCOL
-  validation_manifest['assignment_reason'] = validation_manifest[
-      'assignment_reason'].str.replace(
-          'repetition split', 'fit/validation repetition split', regex=False)
+  validation_manifest['assignment_reason'] = (
+      validation_manifest['assignment_reason'] +
+      ' (fit/validation within development set)')
   validate_validation_manifest(validation_manifest, expected_seed=seed)
   return validation_manifest
 

@@ -86,6 +86,23 @@ def parse_trial_name(path):
   return metadata
 
 
+def parse_sensor_trial_path(path):
+  """Parse a sensor path and make the subject folder authoritative."""
+  path = Path(path)
+  metadata = parse_trial_name(path)
+  metadata['source_trial_stem'] = metadata['trial_stem']
+  folder_subject = path.parent.name
+  folder_is_subject = re.fullmatch(r'S[AE]\d{2}', folder_subject) is not None
+  mismatch = folder_is_subject and folder_subject != metadata['subject']
+  metadata['filename_subject_mismatch'] = mismatch
+  if mismatch:
+    metadata['subject'] = folder_subject
+    metadata['age_group'] = 'Adult' if folder_subject.startswith('SA') else 'Elderly'
+    metadata['trial_stem'] = '_'.join([
+        metadata['activity'], folder_subject, metadata['trial']])
+  return metadata
+
+
 def build_dataset_index(dataset_path, enhanced_path):
   dataset_path = Path(dataset_path)
   enhanced_path = Path(enhanced_path)
@@ -114,7 +131,7 @@ def build_dataset_index(dataset_path, enhanced_path):
   if dataset_path.exists():
     for sensor_path in sorted(dataset_path.rglob('*.txt')):
       try:
-        metadata = parse_trial_name(sensor_path)
+        metadata = parse_sensor_trial_path(sensor_path)
       except ValueError:
         continue
       metadata.update({
@@ -125,12 +142,29 @@ def build_dataset_index(dataset_path, enhanced_path):
       records.append(metadata)
 
   columns = [
-      'trial_stem', 'activity', 'activity_type', 'activity_description',
+      'trial_stem', 'source_trial_stem', 'filename_subject_mismatch',
+      'activity', 'activity_type', 'activity_description',
       'subject', 'age_group', 'trial', 'expected_trials',
       'expected_duration_seconds', 'sensor_path', 'label_path',
       'has_enhanced_labels',
   ]
   return pd.DataFrame(records, columns=columns)
+
+
+def paired_dataset_index(dataset_index):
+  """Return only sensor trials that have a matching enhanced-label file.
+
+  The sensor dataset remains the source of recordings. Enhanced-only files are
+  never introduced, and sensor recordings without an enhanced counterpart are
+  returned separately so callers can report exactly what was skipped.
+  """
+  if 'has_enhanced_labels' not in dataset_index.columns:
+    raise ValueError("dataset_index must contain 'has_enhanced_labels'")
+
+  paired_mask = dataset_index['has_enhanced_labels'].fillna(False)
+  paired = dataset_index.loc[paired_mask].copy().reset_index(drop=True)
+  skipped = dataset_index.loc[~paired_mask].copy().reset_index(drop=True)
+  return paired, skipped
 
 
 def dataset_overview(dataset_index):
@@ -160,6 +194,8 @@ def dataset_overview(dataset_index):
       ('Fall recordings', int(fall_rows.sum())),
       ('Fall recordings with enhanced labels', int((fall_rows & dataset_index['has_enhanced_labels']).sum())),
       ('Fall recordings missing enhanced labels', int((fall_rows & ~dataset_index['has_enhanced_labels']).sum())),
+      ('Filename/folder subject mismatches corrected', int(
+          dataset_index['filename_subject_mismatch'].sum())),
       ('Sampling rate', f'{SAMPLING_RATE} Hz'),
       ('Sensor channels', len(SENSOR_COLUMNS)),
   ], columns=['Metric', 'Value'])

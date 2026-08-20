@@ -13,6 +13,9 @@ import re
 RAW_WINDOWS = 'raw_windows'
 PREVIOUS_WINDOW_DIFFERENCE = 'previous_window_difference'
 SUPPORTED_PREPROCESSING_MODES = {RAW_WINDOWS, PREVIOUS_WINDOW_DIFFERENCE}
+BINARY_EVENT_LABELS = 'binary_event'
+THREE_CLASS_LABELS = 'three_class'
+SUPPORTED_LABEL_MODES = {BINARY_EVENT_LABELS, THREE_CLASS_LABELS}
 
 
 class DatasetProcessor():
@@ -20,6 +23,19 @@ class DatasetProcessor():
   def __init__(self, enhanced_path=None):
     self.enhanced_path = Path(enhanced_path) if enhanced_path is not None else None
     self.__enhanced_files = None
+
+  @staticmethod
+  def _canonical_trial_parts(data_path):
+    data_path = Path(data_path)
+    parts = data_path.stem.split('_')
+    if len(parts) != 3:
+      raise ValueError(f'Unexpected SisFall file name: {data_path.name}')
+    activity, filename_subject, trial = parts
+    folder_subject = data_path.parent.name
+    subject = (folder_subject
+               if re.fullmatch(r'S[AE]\d{2}', folder_subject)
+               else filename_subject)
+    return activity, subject, trial, filename_subject
 
   def get_file_name(self, path, ratio=0.8):
     path = os.fspath(path)
@@ -122,7 +138,8 @@ class DatasetProcessor():
           raise ValueError(f'Duplicate enhanced label file for {stem}')
         self.__enhanced_files[stem] = label_path
 
-    trial_stem = Path(data_path).stem
+    activity, subject, trial, _ = self._canonical_trial_parts(data_path)
+    trial_stem = '_'.join([activity, subject, trial])
     if trial_stem not in self.__enhanced_files:
       raise FileNotFoundError(
           f'No enhanced label file found for {trial_stem} in {self.enhanced_path}')
@@ -179,7 +196,8 @@ class DatasetProcessor():
     return targets, pre_fall_count, fall_count
 
   def process_trials(self, dataset_paths, window_size=200,
-                     preprocessing_mode=PREVIOUS_WINDOW_DIFFERENCE):
+                     preprocessing_mode=PREVIOUS_WINDOW_DIFFERENCE,
+                     label_mode=THREE_CLASS_LABELS):
     """Create windows independently inside every recording.
 
     Incomplete trial tails are dropped. The compatibility difference transform
@@ -191,6 +209,10 @@ class DatasetProcessor():
       raise ValueError(
           f'Unsupported preprocessing mode {preprocessing_mode!r}; choose from '
           f'{sorted(SUPPORTED_PREPROCESSING_MODES)}')
+    if label_mode not in SUPPORTED_LABEL_MODES:
+      raise ValueError(
+          f'Unsupported label mode {label_mode!r}; choose from '
+          f'{sorted(SUPPORTED_LABEL_MODES)}')
     feature_batches = []
     label_batches = []
     metadata_rows = []
@@ -212,7 +234,12 @@ class DatasetProcessor():
       usable_size = n_windows * window_size
       windows = sensor_data[:usable_size].reshape(n_windows, window_size, 9)
       label_windows = labels[:usable_size].reshape(n_windows, window_size)
-      targets, pre_fall_count, fall_count = self._three_class_window_labels(label_windows)
+      if label_mode == BINARY_EVENT_LABELS:
+        targets = np.any(label_windows != 0, axis=1).astype(np.int8)
+      else:
+        targets, _, _ = self._three_class_window_labels(label_windows)
+      pre_fall_count = np.count_nonzero(label_windows == 2, axis=1)
+      fall_count = np.count_nonzero(label_windows == 1, axis=1)
       pre_fall_start = np.where(
           pre_fall_count > 0, np.argmax(label_windows == 2, axis=1), np.nan)
       fall_start = np.where(
@@ -224,21 +251,23 @@ class DatasetProcessor():
         np.subtract(windows[1:], windows[:-1], out=window_differences[1:])
         windows = window_differences
 
-      parts = data_path.stem.split('_')
-      if len(parts) != 3:
-        raise ValueError(f'Unexpected SisFall file name: {data_path.name}')
-      activity, subject, trial = parts
+      activity, subject, trial, filename_subject = self._canonical_trial_parts(
+          data_path)
+      trial_stem = '_'.join([activity, subject, trial])
       no_fall_count = window_size - pre_fall_count - fall_count
       for window_index in range(n_windows):
         start_sample = window_index * window_size
         metadata_rows.append({
-            'trial_stem': data_path.stem,
+            'trial_stem': trial_stem,
+            'source_trial_stem': data_path.stem,
+            'filename_subject_mismatch': filename_subject != subject,
             'activity': activity,
             'subject': subject,
             'age_group': 'Adult' if subject.startswith('SA') else 'Elderly',
             'trial': trial,
             'source_file': str(data_path),
             'preprocessing_mode': preprocessing_mode,
+            'label_mode': label_mode,
             'window_index': window_index,
             'start_sample': start_sample,
             'end_sample': start_sample + window_size - 1,
@@ -267,6 +296,7 @@ class DatasetProcessor():
             pd.DataFrame(metadata_rows))
 
   def normalizer(self, scaler, X_train, X_test):
+    """Fit nine independent channel statistics on train and transform test."""
     X_train = scaler.fit_transform(X_train.reshape(-1, X_train.shape[-1])).reshape(X_train.shape)
     X_test = scaler.transform(X_test.reshape(-1, X_test.shape[-1])).reshape(X_test.shape)
     return (X_train.astype(np.float32, copy=False),
@@ -274,7 +304,7 @@ class DatasetProcessor():
 
   @staticmethod
   def validate_model_inputs(features, labels, metadata=None,
-                            expected_labels=(0, 1, 2)):
+                            expected_labels=(0, 1)):
     if features.ndim != 3 or features.shape[-1] != 9:
       raise ValueError(
           f'Expected model input shaped (windows, samples, 9), found {features.shape}')
