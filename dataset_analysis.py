@@ -51,7 +51,7 @@ ACTIVITIES = {
     'F15': ('Lateral fall while sitting', 5, 15),
 }
 
-LABEL_NAMES = {0: 'No fall', 2: 'Pre-fall / impact', 1: 'Fall'}
+LABEL_NAMES = {0: 'No fall', 2: 'Pre-fall', 1: 'Fall'}
 LABEL_COLORS = {0: '#b7e4c7', 2: '#ffd166', 1: '#ef476f'}
 TRIAL_PATTERN = re.compile(
     r'^(?P<activity>[DF]\d{2})_(?P<subject>S[AE]\d{2})_(?P<trial>R\d{2})$')
@@ -99,6 +99,14 @@ def build_dataset_index(dataset_path, enhanced_path):
       except ValueError:
         continue
       if stem in label_paths:
+        prefix = 'SisfallEnhanced_'
+        is_enhanced_name = label_path.stem.startswith(prefix)
+        existing_is_enhanced = label_paths[stem].stem.startswith(prefix)
+        if is_enhanced_name and not existing_is_enhanced:
+          label_paths[stem] = label_path
+          continue
+        if not is_enhanced_name and existing_is_enhanced:
+          continue
         raise ValueError(f'Duplicate enhanced label file for {stem}')
       label_paths[stem] = label_path
 
@@ -213,6 +221,22 @@ def split_overview(split_manifest):
       .unstack(fill_value=0)
       .reset_index())
   return summary, activity_split
+
+
+def window_label_overview(window_metadata):
+  """Summarize useful class and label-composition information for windows."""
+  if window_metadata is None or window_metadata.empty:
+    return pd.DataFrame()
+  summary = (window_metadata
+      .groupby('target', as_index=False)
+      .agg(windows=('target', 'size'),
+           trials=('trial_stem', 'nunique'),
+           mean_no_fall_fraction=('no_fall_fraction', 'mean'),
+           mean_pre_fall_fraction=('pre_fall_fraction', 'mean'),
+           mean_fall_fraction=('fall_fraction', 'mean')))
+  summary.insert(1, 'label', summary['target'].map(LABEL_NAMES))
+  return summary.sort_values(
+      'target', key=lambda values: values.map({0: 0, 2: 1, 1: 2}))
 
 
 def read_sensor_trial(path):

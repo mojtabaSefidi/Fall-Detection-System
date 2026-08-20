@@ -1,13 +1,13 @@
 from sklearn.utils import compute_class_weight
 from itertools import groupby
 from tqdm import tqdm
-from math import sqrt
 from pathlib import Path
 import pandas as pd
 import numpy as np
 import random
 import glob
 import os
+import re
 
 
 class DatasetProcessor():
@@ -47,12 +47,13 @@ class DatasetProcessor():
 
   def __read_data(self, data_path):
     data = pd.read_csv(data_path, header=None)
+    if data.shape[1] != 9:
+      raise ValueError(
+          f'Expected 9 sensor columns in {Path(data_path).name}, found {data.shape[1]}')
     data.columns = ['ADXL345_x', 'ADXL345_y', 'ADXL345_z', 'ITG3200_x', 'ITG3200_y', 'ITG3200_z', 'MMA8451Q_x',
                     'MMA8451Q_y', 'MMA8451Q_z']
-    data['MMA8451Q_z'] = data['MMA8451Q_z'].map(lambda x: str(x)[:-1])
-    for name in data.columns :
-      data[name] = data[name].astype(float)
-    return data
+    data['MMA8451Q_z'] = data['MMA8451Q_z'].astype(str).str.rstrip(';')
+    return data.astype(np.float32)
 
   def __add_label(self, data_path, merge_feature=False):
 
@@ -68,13 +69,12 @@ class DatasetProcessor():
       return dataset.to_numpy()
 
     else:
-      new_dataset = pd.DataFrame()
-      new_dataset['acc_1'] = dataset.apply(
-          lambda row: sqrt((row.ADXL345_x ** 2 + row.ADXL345_y ** 2 + row.ADXL345_z ** 2)), axis=1)
-      new_dataset['acc_2'] = dataset.apply(
-          lambda row: sqrt((row.MMA8451Q_x ** 2 + row.MMA8451Q_y ** 2 + row.MMA8451Q_z ** 2)), axis=1)
-      new_dataset['geo'] = dataset.apply(
-          lambda row: sqrt((row.ITG3200_x ** 2 + row.ITG3200_y ** 2 + row.ITG3200_z ** 2)), axis=1)
+      values = dataset.to_numpy(dtype=np.float32, copy=False)
+      new_dataset = pd.DataFrame({
+          'acc_1': np.linalg.norm(values[:, 0:3], axis=1),
+          'acc_2': np.linalg.norm(values[:, 6:9], axis=1),
+          'geo': np.linalg.norm(values[:, 3:6], axis=1),
+      })
       new_dataset['label'] = labels
 
       return np.round(new_dataset.to_numpy(), 2)
@@ -85,8 +85,13 @@ class DatasetProcessor():
       return int(0)
     elif label =='F':
       label_path = self.__get_label_path(data_path)
-      labels = pd.read_csv(label_path, header=None)
+      labels = pd.read_csv(label_path, header=None).to_numpy(dtype=np.int8).ravel()
+      invalid_labels = set(np.unique(labels)) - {0, 1, 2}
+      if invalid_labels:
+        raise ValueError(
+            f'Unexpected labels {sorted(invalid_labels)} in {Path(label_path).name}')
       return labels
+    raise ValueError(f'Unknown activity type in {Path(data_path).name}')
 
   def __get_label_path(self, data_path):
     if self.enhanced_path is None:
@@ -97,9 +102,18 @@ class DatasetProcessor():
       prefix = 'SisfallEnhanced_'
       for label_path in self.enhanced_path.rglob('*.txt'):
         stem = label_path.stem
-        if stem.startswith(prefix):
+        is_enhanced_name = stem.startswith(prefix)
+        if is_enhanced_name:
           stem = stem[len(prefix):]
+        if re.fullmatch(r'[DF]\d{2}_S[AE]\d{2}_R\d{2}', stem) is None:
+          continue
         if stem in self.__enhanced_files:
+          existing_is_enhanced = self.__enhanced_files[stem].stem.startswith(prefix)
+          if is_enhanced_name and not existing_is_enhanced:
+            self.__enhanced_files[stem] = label_path
+            continue
+          if not is_enhanced_name and existing_is_enhanced:
+            continue
           raise ValueError(f'Duplicate enhanced label file for {stem}')
         self.__enhanced_files[stem] = label_path
 
@@ -127,11 +141,10 @@ class DatasetProcessor():
     label = dataset[:usable_size,-1]
     feature = feature.ravel().reshape(feature.size//window,window)
     label = label.reshape(label.size// window_size, window_size)
-    label = label.sum(axis=1)
-    label[label > 0] = 1
+    label, _, _ = self._three_class_window_labels(label)
     feature = np.roll((np.roll(feature, -1, axis=0) - feature), 1, axis=0)
     feature[0] = 0
-    return feature, label.ravel()
+    return feature, label
 
   def windowing3d(self, dataset, window_size=200):
     n_windows = len(dataset) // window_size
@@ -140,17 +153,106 @@ class DatasetProcessor():
     feature = dataset[:usable_size,0:-1]
     label = dataset[:usable_size,-1]
     feature = feature.reshape(n_windows, window_size, dataset.shape[1]-1)
-    label = label.reshape(n_windows, window_size, 1)
-    label = label.sum(axis=1)
-    label[label > 0] = 1
+    label = label.reshape(n_windows, window_size)
+    label, _, _ = self._three_class_window_labels(label)
     feature = np.roll((np.roll(feature, -1, axis=0) - feature), 1, axis=0)
     feature[0] = 0
-    return feature, label.ravel()
+    return feature, label
+
+  @staticmethod
+  def _three_class_window_labels(label_windows):
+    """Label windows as 0=no fall, 2=pre-fall, or 1=fall.
+
+    Event windows use the dominant non-zero stage. Ties are assigned to fall,
+    which avoids losing a fall event while preserving pre-fall transition windows.
+    """
+    pre_fall_count = np.count_nonzero(label_windows == 2, axis=1)
+    fall_count = np.count_nonzero(label_windows == 1, axis=1)
+    targets = np.zeros(len(label_windows), dtype=np.int8)
+    targets[pre_fall_count > fall_count] = 2
+    targets[(fall_count > 0) & (fall_count >= pre_fall_count)] = 1
+    return targets, pre_fall_count, fall_count
+
+  def process_trials(self, dataset_paths, window_size=200, apply_window_difference=True):
+    """Create windows independently inside every recording.
+
+    Incomplete trial tails are dropped, and the optional difference transform is
+    reset at each trial boundary. The returned metadata makes every generated
+    window traceable to its original recording and label composition.
+    """
+    feature_batches = []
+    label_batches = []
+    metadata_rows = []
+
+    for data_path in tqdm(dataset_paths, ncols=70, desc='Windowing trials'):
+      data_path = Path(data_path)
+      sensor_data = self.__read_data(data_path).to_numpy(dtype=np.float32, copy=False)
+      labels = self.__get_label(data_path)
+      if np.isscalar(labels):
+        labels = np.full(len(sensor_data), labels, dtype=np.int8)
+      if len(labels) != len(sensor_data):
+        raise ValueError(
+            f'Row mismatch for {data_path.name}: '
+            f'{len(sensor_data)} sensor rows and {len(labels)} label rows')
+
+      n_windows = len(sensor_data) // window_size
+      if n_windows == 0:
+        continue
+      usable_size = n_windows * window_size
+      windows = sensor_data[:usable_size].reshape(n_windows, window_size, 9)
+      label_windows = labels[:usable_size].reshape(n_windows, window_size)
+      targets, pre_fall_count, fall_count = self._three_class_window_labels(label_windows)
+
+      if apply_window_difference:
+        window_differences = np.empty_like(windows, dtype=np.float32)
+        window_differences[0] = 0
+        np.subtract(windows[1:], windows[:-1], out=window_differences[1:])
+        windows = window_differences
+
+      parts = data_path.stem.split('_')
+      if len(parts) != 3:
+        raise ValueError(f'Unexpected SisFall file name: {data_path.name}')
+      activity, subject, trial = parts
+      no_fall_count = window_size - pre_fall_count - fall_count
+      for window_index in range(n_windows):
+        start_sample = window_index * window_size
+        metadata_rows.append({
+            'trial_stem': data_path.stem,
+            'activity': activity,
+            'subject': subject,
+            'age_group': subject[:2],
+            'trial': trial,
+            'source_file': str(data_path),
+            'window_index': window_index,
+            'start_sample': start_sample,
+            'end_sample': start_sample + window_size - 1,
+            'start_time_seconds': start_sample / 200,
+            'end_time_seconds': (start_sample + window_size) / 200,
+            'no_fall_samples': int(no_fall_count[window_index]),
+            'pre_fall_samples': int(pre_fall_count[window_index]),
+            'fall_samples': int(fall_count[window_index]),
+            'no_fall_fraction': no_fall_count[window_index] / window_size,
+            'pre_fall_fraction': pre_fall_count[window_index] / window_size,
+            'fall_fraction': fall_count[window_index] / window_size,
+            'target': int(targets[window_index]),
+        })
+
+      feature_batches.append(windows)
+      label_batches.append(targets)
+
+    if not feature_batches:
+      return (np.empty((0, window_size, 9), dtype=np.float32),
+              np.empty(0, dtype=np.int8),
+              pd.DataFrame(metadata_rows))
+    return (np.concatenate(feature_batches),
+            np.concatenate(label_batches),
+            pd.DataFrame(metadata_rows))
 
   def normalizer(self, scaler, X_train, X_test):
     X_train = scaler.fit_transform(X_train.reshape(-1, X_train.shape[-1])).reshape(X_train.shape)
     X_test = scaler.transform(X_test.reshape(-1, X_test.shape[-1])).reshape(X_test.shape)
-    return X_train, X_test
+    return (X_train.astype(np.float32, copy=False),
+            X_test.astype(np.float32, copy=False))
 
   def generate_class_weight(self, label):
     class_weights = compute_class_weight(class_weight = "balanced",

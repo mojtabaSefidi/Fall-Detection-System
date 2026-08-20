@@ -5,7 +5,7 @@
 ## Introduction
 Fall detection among the elderly is a crucial issue in healthcare due to the high risk of injury and related complications. Falls are a leading cause of hospitalizations and long-term disabilities in older adults, making early and accurate detection vital for timely intervention. With advancements in wearable technology and machine learning, automated fall detection systems can help monitor and safeguard the elderly, offering both autonomy and security.
 
-The SisFall dataset was specifically developed to address this problem. It provides a rich source of sensor data collected from accelerometers and gyroscopes, enabling the development of effective fall detection systems. Various machine learning algorithms can be trained on this dataset to distinguish between normal activities and falls, allowing for automated, real-time monitoring and response.
+The SisFall dataset was specifically developed to address this problem. It provides a rich source of sensor data collected from accelerometers and gyroscopes, enabling the development of effective fall detection systems. Various machine learning algorithms can be trained on this dataset to distinguish among normal activity, the pre-fall stage, and the fall stage, allowing for more informative automated monitoring and response.
 
 ## SisFall Dataset Overview
 The SisFall dataset is designed to support fall detection research, focusing on elderly individuals prone to falls. It includes simulated fall events and normal activities recorded using wearable sensors, such as accelerometers and gyroscopes. These sensors are worn on the subjects' bodies to capture movement data, enabling researchers to analyze the patterns associated with different activities.
@@ -45,9 +45,26 @@ SISFALL_CACHE_PATH
 SISFALL_RESULT_PATH
 ```
 
-Cached arrays are loaded before preprocessing unless `REPROCESS_DATA` is enabled.
-When preprocessing runs, the exact train/test recording assignment is saved as
-`split_manifest.csv` alongside the cached arrays.
+Versioned NumPy arrays are loaded before preprocessing unless `REPROCESS_DATA` is enabled.
+When preprocessing runs, the exact train/test recording assignment, fitted scaler,
+and traceable train/test window metadata are saved with the cached arrays. Set
+`SISFALL_N_JOBS` to control CPU parallelism for supported traditional models and
+hyperparameter searches; its default is `-1` (all available CPU cores).
+
+## Three-class preprocessing
+
+The enhanced labels are preserved as three model targets:
+
+* `0`: no fall
+* `2`: pre-fall
+* `1`: fall
+
+Each recording is windowed independently into non-overlapping one-second windows
+(200 samples at 200 Hz), so no window can cross a trial boundary. Incomplete tails
+are dropped. A window containing event samples is assigned its dominant non-zero
+stage; a tie is assigned to fall. The optional consecutive-window difference is
+also reset at the start of every recording. Window composition and source location
+are available in `train_window_metadata.csv` and `test_window_metadata.csv`.
 
 ## How to Access the Dataset
 
@@ -65,7 +82,7 @@ When preprocessing runs, the exact train/test recording assignment is saved as
 #### `data_processor.py`
 * **Objective:** Process the dataset and convert it into a time-series format.
 * **Input:** SisFall dataset.
-* **Output:** `X_train`, `y_train`, `X_test`, `y_test`.
+* **Output:** Three-class `X_train`, `y_train`, `X_test`, `y_test`, plus per-window metadata.
 
 #### `deep_models.py`
 * **Objective:** Implementation and evaluation of deep learning models.

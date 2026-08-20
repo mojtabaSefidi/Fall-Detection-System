@@ -1,4 +1,5 @@
 from sklearn.metrics import classification_report, confusion_matrix, precision_recall_curve, roc_auc_score, roc_curve
+from sklearn.preprocessing import label_binarize
 import matplotlib.pyplot as plt
 from tensorflow import keras
 import seaborn as sn
@@ -10,9 +11,12 @@ sn.set()
 
 
 colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+CLASS_LABELS = [0, 2, 1]
+CLASS_NAMES = ['no fall', 'pre-fall', 'fall']
 
-def plot_confusion_matrix(confusion_matrix, title='', cmap ='Greens'):
-    df = pd.DataFrame(confusion_matrix, ['not fall', 'fall'], ['not fall', 'fall'])
+def plot_confusion_matrix(confusion_matrix, title='', cmap='Greens', class_names=None):
+    class_names = class_names or CLASS_NAMES[:len(confusion_matrix)]
+    df = pd.DataFrame(confusion_matrix, class_names, class_names)
     plt.figure(figsize=(7,4))
     if title == '' :
         plt.title('Confusion Matrix')
@@ -26,14 +30,21 @@ def plot_confusion_matrix(confusion_matrix, title='', cmap ='Greens'):
 
 
 def plot_precision_recall_curve(actual_labels, prediction, title='', model_name='', file_name=None):
-    precision, recall, thresholds=precision_recall_curve(actual_labels, prediction)
     fig, ax = plt.subplots(figsize=(8,6))
-    ax.plot(recall, precision, label='Model: {model_name}'.format(model_name=model_name), color='purple')
+    if np.ndim(prediction) == 1 or np.shape(prediction)[-1] == 1:
+        precision, recall, _ = precision_recall_curve(actual_labels, np.ravel(prediction))
+        ax.plot(recall, precision, label=f'Model: {model_name}', color='purple')
+    else:
+        encoded = label_binarize(actual_labels, classes=np.arange(prediction.shape[1]))
+        for class_id, class_name in zip(CLASS_LABELS, CLASS_NAMES):
+            precision, recall, _ = precision_recall_curve(encoded[:, class_id], prediction[:, class_id])
+            ax.plot(recall, precision, label=class_name)
 
     # add axis labels to plot
     plt.title(title or 'Precision-Recall Curve')
     ax.set_ylabel('Precision')
     ax.set_xlabel('Recall')
+    ax.legend()
 
     # display plot
     if file_name is not None:
@@ -41,23 +52,30 @@ def plot_precision_recall_curve(actual_labels, prediction, title='', model_name=
     plt.show()
 
 def plot_roc_curve(actual_labels, prediction, title='', model_name='', file_name=None):
-    fpr, tpr, _ = roc_curve(actual_labels, prediction)
     plt.figure(figsize=(8,6))
-    plt.plot(fpr, tpr, label='Model: {model_name}'.format(model_name=model_name), color='blue')
+    if np.ndim(prediction) == 1 or np.shape(prediction)[-1] == 1:
+        fpr, tpr, _ = roc_curve(actual_labels, np.ravel(prediction))
+        plt.plot(fpr, tpr, label=f'Model: {model_name}', color='blue')
+    else:
+        encoded = label_binarize(actual_labels, classes=np.arange(prediction.shape[1]))
+        for class_id, class_name in zip(CLASS_LABELS, CLASS_NAMES):
+            fpr, tpr, _ = roc_curve(encoded[:, class_id], prediction[:, class_id])
+            plt.plot(fpr, tpr, label=class_name)
     plt.title(title or 'ROC Learning Curves')
     plt.xlabel('false positive rate')
     plt.ylabel('true positive rate')
+    plt.legend()
     if file_name is not None:
         plt.savefig(file_name)
     plt.show()
 
 def plot_metrics(history):
-    metrics = ['loss', 'PRC', 'Precision', 'Recall']
-    plt.figure(figsize=(10,10),linewidth = 7, edgecolor="whitesmoke")
+    metrics = [key for key in ('loss', 'Accuracy') if key in history.history]
+    plt.figure(figsize=(10, 4 * len(metrics)), linewidth=7, edgecolor="whitesmoke")
 
     for n, metric in enumerate(metrics):
         name = metric.replace("_"," ").capitalize()
-        plt.subplot(2,2,n+1)
+        plt.subplot(len(metrics), 1, n + 1)
         plt.plot(history.epoch, history.history[metric], color=colors[0], label='Train')
         plt.plot(history.epoch, history.history['val_'+metric],
              color=colors[0], linestyle="--", label='Val')
@@ -72,11 +90,19 @@ def plot_metrics(history):
         plt.legend()
 
 def plot_auc_curve(actual_labels, prediction, title='', model_name='', file_name = None):
-    fpr, tpr, _ = roc_curve(actual_labels,  prediction)
-    auc = roc_auc_score(actual_labels, prediction).round(4)
     plt.figure(figsize=(8,6))
     plt.title(title or 'AUC Learning Curves')
-    plt.plot(fpr,tpr, label='Model: '+ model_name + ", AUC=" + str(auc), color='red')
+    if np.ndim(prediction) == 1 or np.shape(prediction)[-1] == 1:
+        prediction = np.ravel(prediction)
+        fpr, tpr, _ = roc_curve(actual_labels, prediction)
+        auc = roc_auc_score(actual_labels, prediction).round(4)
+        plt.plot(fpr, tpr, label=f'Model: {model_name}, AUC={auc}', color='red')
+    else:
+        encoded = label_binarize(actual_labels, classes=np.arange(prediction.shape[1]))
+        for class_id, class_name in zip(CLASS_LABELS, CLASS_NAMES):
+            fpr, tpr, _ = roc_curve(encoded[:, class_id], prediction[:, class_id])
+            auc = roc_auc_score(encoded[:, class_id], prediction[:, class_id]).round(4)
+            plt.plot(fpr, tpr, label=f'{class_name}, AUC={auc}')
     plt.legend(loc=4)
     if file_name is not None:
         plt.savefig(file_name)
@@ -115,18 +141,12 @@ def load_pickle(path):
     return pickle.load(f)
 
 def get_classifiaction_metrics():
-  metrics = [keras.metrics.TruePositives(name='TP'),
-             keras.metrics.FalsePositives(name='FP'),
-             keras.metrics.TrueNegatives(name='TN'),
-             keras.metrics.FalseNegatives(name='FN'),
-             keras.metrics.BinaryAccuracy(name='Accuracy'),
-             keras.metrics.Precision(name='Precision'),
-             keras.metrics.Recall(name='Recall'),
-             keras.metrics.AUC(name='AUC'),
-             keras.metrics.AUC(name='PRC', curve='PR')]
-  return metrics
+  return get_classification_metrics()
 
-def get_early_stopping(metric='val_PRC', patience=5, mode='max'):
+def get_classification_metrics():
+  return [keras.metrics.SparseCategoricalAccuracy(name='Accuracy')]
+
+def get_early_stopping(metric='val_loss', patience=5, mode='min'):
   early_stopping = keras.callbacks.EarlyStopping(monitor=metric,
                                                 verbose=1,
                                                 patience=patience,

@@ -1,7 +1,9 @@
 from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.tree import DecisionTreeClassifier
-from utils import *
 import numpy as np
+
+from utils import CLASS_LABELS, CLASS_NAMES, plot_confusion_matrix
 
 
 class Traditional_Models():
@@ -10,11 +12,13 @@ class Traditional_Models():
                models,
                model_parameters,
                predictions=None,
-               results=None):
+               results=None,
+               n_jobs=-1):
     self.models = models
     self.model_parameters = model_parameters
     self.predictions = {} if predictions is None else predictions
     self.results = {} if results is None else results
+    self.n_jobs = n_jobs
 
   def __validation(self, X_train, y_train, validation_size=0.35):
     _, X_validation, _, y_validation = train_test_split(X_train, y_train, test_size=validation_size, stratify=y_train)
@@ -29,7 +33,8 @@ class Traditional_Models():
     return X_train[:,important_features], X_test[:,important_features]
 
   def __parameter_tuning(self, model, parameters, X_validation, y_validation, scoring='f1_macro'):
-    optimizer = GridSearchCV(estimator=model, param_grid=parameters, scoring=scoring)
+    optimizer = GridSearchCV(
+        estimator=model, param_grid=parameters, scoring=scoring, n_jobs=self.n_jobs)
     optimizer.fit(X_validation, y_validation)
     return model.set_params(**optimizer.best_params_)
 
@@ -38,9 +43,12 @@ class Traditional_Models():
 
   def __evaluate(self, model, X_test, y_test, title=''):
     prediction = model.predict(X_test)
-    self.results[title] = classification_report(y_test, prediction, output_dict=True)
+    self.results[title] = classification_report(
+        y_test, prediction, labels=CLASS_LABELS, target_names=CLASS_NAMES,
+        output_dict=True, zero_division=0)
     print()
-    plot_confusion_matrix(confusion_matrix(y_test, prediction), title=title)
+    matrix = confusion_matrix(y_test, prediction, labels=CLASS_LABELS)
+    plot_confusion_matrix(matrix, title=title, class_names=CLASS_NAMES)
     print()
     return prediction
 

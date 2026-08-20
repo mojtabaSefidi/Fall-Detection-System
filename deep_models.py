@@ -1,7 +1,11 @@
 from tensorflow import keras
 import tensorflow as tf
 import numpy as np
-from utils import *
+from sklearn.metrics import classification_report, confusion_matrix
+
+from utils import (CLASS_LABELS, CLASS_NAMES, plot_auc_curve,
+                   plot_confusion_matrix, plot_history, plot_metrics,
+                   plot_precision_recall_curve, plot_roc_curve)
 
 class Train_Evaluate_Deep():
 
@@ -12,7 +16,7 @@ class Train_Evaluate_Deep():
       self.predictions = {} if predictions is None else predictions
       self.results = {} if results is None else results
 
-  def build_cnn(self, input_size, units=128, drop_rate=0.25, filter=32, kernel_size=(1*9), output_size=1):
+  def build_cnn(self, input_size, units=128, drop_rate=0.25, filter=32, kernel_size=(1*9), output_size=3):
     input = keras.layers.Input((input_size))
     x = keras.layers.Conv1D(filters=filter//2, kernel_size=kernel_size, padding='same', activation='relu', name="conv1")(input)
     x = keras.layers.Conv1D(filters=filter, kernel_size=kernel_size, padding='same', activation='relu', name="conv2")(x)
@@ -24,11 +28,11 @@ class Train_Evaluate_Deep():
     classifier = keras.layers.Dropout(drop_rate)(classifier)
     classifier = keras.layers.Dense(units//2, activation='relu')(classifier)
     classifier = keras.layers.Dropout(drop_rate)(classifier)
-    output = keras.layers.Dense(output_size, activation='sigmoid')(classifier)
+    output = keras.layers.Dense(output_size, activation='softmax')(classifier)
     model = keras.Model(inputs=input, outputs=output)
     return model
 
-  def build_lstm(self, input_size, units=128, drop_rate=0.25, lstm_units=16, output_size=1):
+  def build_lstm(self, input_size, units=128, drop_rate=0.25, lstm_units=16, output_size=3):
     input = keras.layers.Input((input_size))
     x = keras.layers.LSTM(units=lstm_units//2, input_shape=input_size, return_sequences=True, name="lstm1")(input)
     x = keras.layers.LSTM(units=lstm_units, input_shape=input_size, return_sequences=True, name="lstm2")(x)
@@ -40,11 +44,11 @@ class Train_Evaluate_Deep():
     classifier = keras.layers.Dropout(drop_rate)(classifier)
     classifier = keras.layers.Dense(units//2, activation='relu')(classifier)
     classifier = keras.layers.Dropout(drop_rate)(classifier)
-    output = keras.layers.Dense(output_size, activation='sigmoid')(classifier)
+    output = keras.layers.Dense(output_size, activation='softmax')(classifier)
     model = keras.Model(inputs=input, outputs=output)
     return model
 
-  def build_mlp(self, input_size, hidden_layer_size=128, output_size=1, drop_rate=0.25):
+  def build_mlp(self, input_size, hidden_layer_size=128, output_size=3, drop_rate=0.25):
     input = keras.layers.Input((input_size))
     x = keras.layers.Dense(hidden_layer_size//4, activation='relu')(input)
     x = keras.layers.Dense(hidden_layer_size//2, activation='relu')(x)
@@ -56,7 +60,7 @@ class Train_Evaluate_Deep():
     classifier = keras.layers.Dropout(drop_rate)(classifier)
     classifier = keras.layers.Dense(hidden_layer_size//2, activation='relu')(classifier)
     classifier = keras.layers.Dropout(drop_rate)(classifier)
-    output = keras.layers.Dense(output_size, activation='sigmoid')(classifier)
+    output = keras.layers.Dense(output_size, activation='softmax')(classifier)
     model = keras.Model(inputs=input, outputs=output)
     return model
 
@@ -115,10 +119,10 @@ class Train_Evaluate_Deep():
       fit_arguments['class_weight'] = class_weight
     return model.fit(X_train, y_train, **fit_arguments)
 
-  def evaluate(self, model, X_test, y_test, batch_size=128, threshold=0.5, title='', model_name='', plot=True):
+  def evaluate(self, model, X_test, y_test, batch_size=128, title='', model_name='', plot=True):
     prediction_scores = model.predict(X_test, batch_size=batch_size)
     self.predictions[model_name] = prediction_scores
-    prediction = np.where(prediction_scores >= threshold, 1, 0)
+    prediction = np.argmax(prediction_scores, axis=1)
     if plot:
       print()
       print('1) Plot ROC Curve...')
@@ -132,10 +136,13 @@ class Train_Evaluate_Deep():
       print('3) Plot Percision_Recall Curve......')
       print()
       plot_precision_recall_curve(y_test, prediction_scores, title='Percision_Recall Curve of {model_name} Model'.format(model_name=model_name), model_name=model_name, file_name=None)
-    report = classification_report(y_test, prediction, output_dict=True)
+    report = classification_report(
+        y_test, prediction, labels=CLASS_LABELS, target_names=CLASS_NAMES,
+        output_dict=True, zero_division=0)
     self.results[model_name] = report
     print()
-    plot_confusion_matrix(confusion_matrix(y_test, prediction), title=title)
+    matrix = confusion_matrix(y_test, prediction, labels=CLASS_LABELS)
+    plot_confusion_matrix(matrix, title=title, class_names=CLASS_NAMES)
     print()
     return prediction
 
