@@ -92,36 +92,28 @@ class Train_Evaluate_Deep():
                        class_weight=None,
                        epochs=100,
                        batch_size=128,
-                       validation_split=0.2):
+                       validation_split=0.2,
+                       verbose=2):
 
     print('----------------------------------')
-    print(model.summary())
+    model.summary()
     print('----------------------------------')
 
     model.compile(optimizer=optimizer,
                   loss=loss_function,
                   metrics=metrics)
 
-    if not class_weight is None:
-      history = model.fit(X_train,
-                          y_train,
-                          batch_size = batch_size,
-                          epochs = epochs,
-                          shuffle = True,
-                          class_weight = class_weight,
-                          validation_split = validation_split,
-                          callbacks = callbacks,
-                          verbose = 1)
-    else:
-      history = model.fit(X_train,
-                          y_train,
-                          batch_size = batch_size,
-                          epochs = epochs,
-                          shuffle = True,
-                          validation_split = validation_split,
-                          callbacks = callbacks,
-                          verbose = 1)
-    return history
+    fit_arguments = {
+        'batch_size': batch_size,
+        'epochs': epochs,
+        'shuffle': True,
+        'validation_split': validation_split,
+        'callbacks': callbacks,
+        'verbose': verbose,
+    }
+    if class_weight is not None:
+      fit_arguments['class_weight'] = class_weight
+    return model.fit(X_train, y_train, **fit_arguments)
 
   def evaluate(self, model, X_test, y_test, batch_size=128, threshold=0.5, title='', model_name='', plot=True):
     prediction_scores = model.predict(X_test, batch_size=batch_size)

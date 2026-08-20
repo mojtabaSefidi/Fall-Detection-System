@@ -28,12 +28,26 @@ The SisFall dataset is designed to support fall detection research, focusing on 
 
 1. Install the required libraries from the `requirements.txt` file:
    ```
-   !pip install -r requirements.txt
+   pip install -r requirements.txt
    ```
 2. Download the dataset.
 3. Open `Main.ipynb`.
-4. Adjust the variables (e.g., relative paths).
+4. Configure the dataset, enhanced-label, cache, and result paths in the configuration cell.
 5. Run the notebook cells.
+
+The notebook works locally or in a cloud notebook. Google Drive mounting is optional.
+Paths can be configured in the notebook or through these environment variables:
+
+```
+SISFALL_DATASET_PATH
+SISFALL_ENHANCED_PATH
+SISFALL_CACHE_PATH
+SISFALL_RESULT_PATH
+```
+
+Cached arrays are loaded before preprocessing unless `REPROCESS_DATA` is enabled.
+When preprocessing runs, the exact train/test recording assignment is saved as
+`split_manifest.csv` alongside the cached arrays.
 
 ## How to Access the Dataset
 
@@ -63,6 +77,12 @@ The SisFall dataset is designed to support fall detection research, focusing on 
 
 #### `utils.py`
 * **Objective:** Collection of utility functions used throughout the project.
+
+#### `dataset_analysis.py`
+* **Objective:** Build the dataset index, validate sensor-label pairs, summarize dataset coverage, and visualize one fall trial across all nine sensor channels.
+
+#### `experiment_utils.py`
+* **Objective:** Lightweight stage timing, platform information, logging, and run-manifest export.
 
 #### `Main.ipynb`
 * **Main Interface:** Provides the main interface for the project.

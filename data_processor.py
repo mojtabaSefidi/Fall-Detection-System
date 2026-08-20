@@ -2,6 +2,7 @@ from sklearn.utils import compute_class_weight
 from itertools import groupby
 from tqdm import tqdm
 from math import sqrt
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import random
@@ -11,17 +12,23 @@ import os
 
 class DatasetProcessor():
 
+  def __init__(self, enhanced_path=None):
+    self.enhanced_path = Path(enhanced_path) if enhanced_path is not None else None
+    self.__enhanced_files = None
+
   def get_file_name(self, path, ratio=0.8):
+    path = os.fspath(path)
+    if not path.endswith(os.sep):
+      path += os.sep
     allfiles = []
     allFolders = sorted(glob.glob(path + "*"))
     for files in allFolders:
-      allfiles.append(sorted(file_path for file_path in glob.glob(files+"/*.txt")
+      allfiles.append(sorted(file_path for file_path in glob.glob(os.path.join(files, '*.txt'))
                              if os.path.basename(file_path).lower() != 'desktop.ini'))
 
     dataset = np.hstack(allfiles)
-    start = dataset[0].rfind('/') + 1
-    end = dataset[0][start:].find('_') + start
-    dataset = [list(g) for k, g in groupby(dataset, key=lambda x: x[start:end])]
+    dataset = [list(group) for _, group in groupby(
+        dataset, key=lambda file_path: Path(file_path).stem.split('_')[0])]
     train = []
     test = []
     for data in dataset:
@@ -50,9 +57,14 @@ class DatasetProcessor():
   def __add_label(self, data_path, merge_feature=False):
 
     dataset = self.__read_data(data_path)
+    labels = self.__get_label(data_path)
+    if not np.isscalar(labels) and len(labels) != len(dataset):
+      raise ValueError(
+          f'Row mismatch for {os.path.basename(data_path)}: '
+          f'{len(dataset)} sensor rows and {len(labels)} label rows')
 
     if not merge_feature:
-      dataset['label'] = self.__get_label(data_path)
+      dataset['label'] = labels
       return dataset.to_numpy()
 
     else:
@@ -63,7 +75,7 @@ class DatasetProcessor():
           lambda row: sqrt((row.MMA8451Q_x ** 2 + row.MMA8451Q_y ** 2 + row.MMA8451Q_z ** 2)), axis=1)
       new_dataset['geo'] = dataset.apply(
           lambda row: sqrt((row.ITG3200_x ** 2 + row.ITG3200_y ** 2 + row.ITG3200_z ** 2)), axis=1)
-      new_dataset['label'] = self.__get_label(data_path)
+      new_dataset['label'] = labels
 
       return np.round(new_dataset.to_numpy(), 2)
 
@@ -72,9 +84,30 @@ class DatasetProcessor():
     if label =='D':
       return int(0)
     elif label =='F':
-      label_path = data_path.replace('dataset', 'enhanced')
+      label_path = self.__get_label_path(data_path)
       labels = pd.read_csv(label_path, header=None)
       return labels
+
+  def __get_label_path(self, data_path):
+    if self.enhanced_path is None:
+      return os.fspath(data_path).replace('dataset', 'enhanced')
+
+    if self.__enhanced_files is None:
+      self.__enhanced_files = {}
+      prefix = 'SisfallEnhanced_'
+      for label_path in self.enhanced_path.rglob('*.txt'):
+        stem = label_path.stem
+        if stem.startswith(prefix):
+          stem = stem[len(prefix):]
+        if stem in self.__enhanced_files:
+          raise ValueError(f'Duplicate enhanced label file for {stem}')
+        self.__enhanced_files[stem] = label_path
+
+    trial_stem = Path(data_path).stem
+    if trial_stem not in self.__enhanced_files:
+      raise FileNotFoundError(
+          f'No enhanced label file found for {trial_stem} in {self.enhanced_path}')
+    return self.__enhanced_files[trial_stem]
 
   def datasets_to_nparray(self, datasets_address_array, outputsize=20000000, column_dimension=10):
     result = np.zeros((outputsize, column_dimension), 'int16')
