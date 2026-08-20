@@ -5,6 +5,7 @@ from importlib import metadata
 import json
 import logging
 import platform
+import shutil
 import sys
 import time
 
@@ -36,6 +37,25 @@ def configure_logging(level=logging.INFO):
   logger.setLevel(level)
   logger.propagate = False
   return logger
+
+
+def stage_directory(source, destination, logger=None):
+  """Optionally copy a dataset directory to faster local storage."""
+  source = Path(source)
+  destination = Path(destination)
+  if not source.exists():
+    raise FileNotFoundError(f'Staging source does not exist: {source}')
+  if source.resolve() == destination.resolve():
+    return source
+  logger = logger or configure_logging()
+  if destination.exists():
+    logger.info('Using existing local dataset stage: %s', destination)
+    return destination
+  logger.info('Staging %s to %s', source, destination)
+  destination.parent.mkdir(parents=True, exist_ok=True)
+  shutil.copytree(source, destination)
+  logger.info('Dataset staging completed: %s', destination)
+  return destination
 
 
 class RunTracker:

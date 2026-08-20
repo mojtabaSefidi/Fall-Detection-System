@@ -10,6 +10,11 @@ import os
 import re
 
 
+RAW_WINDOWS = 'raw_windows'
+PREVIOUS_WINDOW_DIFFERENCE = 'previous_window_difference'
+SUPPORTED_PREPROCESSING_MODES = {RAW_WINDOWS, PREVIOUS_WINDOW_DIFFERENCE}
+
+
 class DatasetProcessor():
 
   def __init__(self, enhanced_path=None):
@@ -173,13 +178,19 @@ class DatasetProcessor():
     targets[(fall_count > 0) & (fall_count >= pre_fall_count)] = 1
     return targets, pre_fall_count, fall_count
 
-  def process_trials(self, dataset_paths, window_size=200, apply_window_difference=True):
+  def process_trials(self, dataset_paths, window_size=200,
+                     preprocessing_mode=PREVIOUS_WINDOW_DIFFERENCE):
     """Create windows independently inside every recording.
 
-    Incomplete trial tails are dropped, and the optional difference transform is
-    reset at each trial boundary. The returned metadata makes every generated
-    window traceable to its original recording and label composition.
+    Incomplete trial tails are dropped. The compatibility difference transform
+    compares corresponding samples in adjacent windows and is reset at each trial
+    boundary; raw_windows keeps the original samples. Metadata makes every window
+    traceable to its recording and label composition.
     """
+    if preprocessing_mode not in SUPPORTED_PREPROCESSING_MODES:
+      raise ValueError(
+          f'Unsupported preprocessing mode {preprocessing_mode!r}; choose from '
+          f'{sorted(SUPPORTED_PREPROCESSING_MODES)}')
     feature_batches = []
     label_batches = []
     metadata_rows = []
@@ -202,8 +213,12 @@ class DatasetProcessor():
       windows = sensor_data[:usable_size].reshape(n_windows, window_size, 9)
       label_windows = labels[:usable_size].reshape(n_windows, window_size)
       targets, pre_fall_count, fall_count = self._three_class_window_labels(label_windows)
+      pre_fall_start = np.where(
+          pre_fall_count > 0, np.argmax(label_windows == 2, axis=1), np.nan)
+      fall_start = np.where(
+          fall_count > 0, np.argmax(label_windows == 1, axis=1), np.nan)
 
-      if apply_window_difference:
+      if preprocessing_mode == PREVIOUS_WINDOW_DIFFERENCE:
         window_differences = np.empty_like(windows, dtype=np.float32)
         window_differences[0] = 0
         np.subtract(windows[1:], windows[:-1], out=window_differences[1:])
@@ -220,9 +235,10 @@ class DatasetProcessor():
             'trial_stem': data_path.stem,
             'activity': activity,
             'subject': subject,
-            'age_group': subject[:2],
+            'age_group': 'Adult' if subject.startswith('SA') else 'Elderly',
             'trial': trial,
             'source_file': str(data_path),
+            'preprocessing_mode': preprocessing_mode,
             'window_index': window_index,
             'start_sample': start_sample,
             'end_sample': start_sample + window_size - 1,
@@ -234,6 +250,8 @@ class DatasetProcessor():
             'no_fall_fraction': no_fall_count[window_index] / window_size,
             'pre_fall_fraction': pre_fall_count[window_index] / window_size,
             'fall_fraction': fall_count[window_index] / window_size,
+            'pre_fall_start_fraction': pre_fall_start[window_index] / window_size,
+            'fall_start_fraction': fall_start[window_index] / window_size,
             'target': int(targets[window_index]),
         })
 
@@ -253,6 +271,23 @@ class DatasetProcessor():
     X_test = scaler.transform(X_test.reshape(-1, X_test.shape[-1])).reshape(X_test.shape)
     return (X_train.astype(np.float32, copy=False),
             X_test.astype(np.float32, copy=False))
+
+  @staticmethod
+  def validate_model_inputs(features, labels, metadata=None,
+                            expected_labels=(0, 1, 2)):
+    if features.ndim != 3 or features.shape[-1] != 9:
+      raise ValueError(
+          f'Expected model input shaped (windows, samples, 9), found {features.shape}')
+    if len(features) != len(labels):
+      raise ValueError('Feature and label window counts do not match')
+    if metadata is not None and len(metadata) != len(labels):
+      raise ValueError('Window metadata and label counts do not match')
+    observed = set(np.unique(labels))
+    expected = set(expected_labels)
+    if observed != expected:
+      raise ValueError(
+          f'Expected model labels {sorted(expected)}, found {sorted(observed)}')
+    return True
 
   def generate_class_weight(self, label):
     class_weights = compute_class_weight(class_weight = "balanced",

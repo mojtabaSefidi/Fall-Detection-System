@@ -43,13 +43,57 @@ SISFALL_DATASET_PATH
 SISFALL_ENHANCED_PATH
 SISFALL_CACHE_PATH
 SISFALL_RESULT_PATH
+SISFALL_EXPERIMENT
+SISFALL_SPLIT_PROTOCOL
+SISFALL_PREPROCESSING_MODE
+SISFALL_RANDOM_SEED
+SISFALL_N_JOBS
+SISFALL_BOOTSTRAP_ITERATIONS
+SISFALL_LOCAL_STAGE_PATH
 ```
 
 Versioned NumPy arrays are loaded before preprocessing unless `REPROCESS_DATA` is enabled.
 When preprocessing runs, the exact train/test recording assignment, fitted scaler,
 and traceable train/test window metadata are saved with the cached arrays. Set
-`SISFALL_N_JOBS` to control CPU parallelism for supported traditional models and
-hyperparameter searches; its default is `-1` (all available CPU cores).
+`SISFALL_N_JOBS` controls CPU parallelism for supported traditional models and
+hyperparameter searches; its default is `-1` (all available CPU cores). Caches
+and results are isolated by split protocol, preprocessing mode, window size, and
+random seed.
+On Colab or another environment with slow mounted storage, setting
+`SISFALL_LOCAL_STAGE_PATH` copies both dataset directories to that faster local
+directory once. It is disabled by default and is unnecessary on a local laptop.
+
+For the main comparison, use the notebook's `EXPERIMENT_NAME` setting:
+
+1. Run all cells with `primary_compatibility`.
+2. Restart the kernel.
+3. Run all cells with `primary_raw`.
+
+The final notebook cell combines completed runs in
+`experiment_comparison.csv`. The additional `subject_compatibility` and
+`subject_raw` presets run the separate subject-independent protocol. The same
+selection can be provided through `SISFALL_EXPERIMENT` without editing the
+notebook.
+
+### Experimental protocols
+
+The default `stratified_trial` protocol evaluates unseen repetitions from known
+subjects. Every complete subject/activity group with five repetitions contributes
+four trials to training and one to testing. Single-trial recordings are balanced
+globally by activity and class. A fixed seed makes the assignment reproducible,
+and `split_manifest.csv` records the split and assignment reason for every trial.
+Model selection and deep-learning early stopping use a second fixed, trial-aware
+fit/validation assignment created only from the training recordings. Its exact
+membership is stored in `validation_manifest.csv`; test recordings are never used
+for validation.
+
+The optional `subject_independent` protocol assigns each subject entirely to one
+side of the split. It is stored and reported separately because it answers a
+different question. Select it with:
+
+```
+SISFALL_SPLIT_PROTOCOL=subject_independent
+```
 
 ## Three-class preprocessing
 
@@ -62,9 +106,31 @@ The enhanced labels are preserved as three model targets:
 Each recording is windowed independently into non-overlapping one-second windows
 (200 samples at 200 Hz), so no window can cross a trial boundary. Incomplete tails
 are dropped. A window containing event samples is assigned its dominant non-zero
-stage; a tie is assigned to fall. The optional consecutive-window difference is
-also reset at the start of every recording. Window composition and source location
-are available in `train_window_metadata.csv` and `test_window_metadata.csv`.
+stage; a tie is assigned to fall. Window composition, event position, and source
+location are available in `train_window_metadata.csv` and
+`test_window_metadata.csv`.
+
+Two preprocessing modes are available without changing the model families:
+
+* `previous_window_difference` (default) preserves the original representation by
+  calculating the current window minus its preceding window at corresponding
+  sample positions. The transform is reset at trial boundaries.
+* `raw_windows` uses normalized sensor windows without the difference transform.
+
+Run the corrected raw-window experiment separately with:
+
+```
+SISFALL_PREPROCESSING_MODE=raw_windows
+```
+
+### Focused reporting
+
+The final analysis saves one compact model table, one overlaid fall
+precision–recall plot, one metric comparison, and combined confusion matrices with
+counts and row percentages. CSV reports cover per-activity false positives,
+per-fall-type false negatives, per-subject performance, window composition,
+false alarms per ADL hour, runtime, model size, and trial-clustered bootstrap
+confidence intervals.
 
 ## How to Access the Dataset
 
@@ -97,6 +163,12 @@ are available in `train_window_metadata.csv` and `test_window_metadata.csv`.
 
 #### `dataset_analysis.py`
 * **Objective:** Build the dataset index, validate sensor-label pairs, summarize dataset coverage, and visualize one fall trial across all nine sensor channels.
+
+#### `splitting_protocols.py`
+* **Objective:** Create, validate, and summarize reproducible trial-based or subject-independent recording assignments.
+
+#### `evaluation_analysis.py`
+* **Objective:** Produce focused metrics, error analysis, confidence intervals, and non-repetitive comparison plots.
 
 #### `experiment_utils.py`
 * **Objective:** Lightweight stage timing, platform information, logging, and run-manifest export.

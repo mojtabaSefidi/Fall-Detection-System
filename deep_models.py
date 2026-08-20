@@ -1,6 +1,7 @@
 from tensorflow import keras
 import tensorflow as tf
 import numpy as np
+import time
 from sklearn.metrics import classification_report, confusion_matrix
 
 from utils import (CLASS_LABELS, CLASS_NAMES, plot_auc_curve,
@@ -11,10 +12,14 @@ class Train_Evaluate_Deep():
 
   def __init__(self,
                predictions=None,
-               results=None):
+               results=None,
+               probabilities=None,
+               performance=None):
 
       self.predictions = {} if predictions is None else predictions
       self.results = {} if results is None else results
+      self.probabilities = {} if probabilities is None else probabilities
+      self.performance = {} if performance is None else performance
 
   def build_cnn(self, input_size, units=128, drop_rate=0.25, filter=32, kernel_size=(1*9), output_size=3):
     input = keras.layers.Input((input_size))
@@ -97,6 +102,7 @@ class Train_Evaluate_Deep():
                        epochs=100,
                        batch_size=128,
                        validation_split=0.2,
+                       validation_data=None,
                        verbose=2):
 
     print('----------------------------------')
@@ -111,18 +117,27 @@ class Train_Evaluate_Deep():
         'batch_size': batch_size,
         'epochs': epochs,
         'shuffle': True,
-        'validation_split': validation_split,
         'callbacks': callbacks,
         'verbose': verbose,
     }
+    if validation_data is None:
+      fit_arguments['validation_split'] = validation_split
+    else:
+      fit_arguments['validation_data'] = validation_data
     if class_weight is not None:
       fit_arguments['class_weight'] = class_weight
     return model.fit(X_train, y_train, **fit_arguments)
 
-  def evaluate(self, model, X_test, y_test, batch_size=128, title='', model_name='', plot=True):
-    prediction_scores = model.predict(X_test, batch_size=batch_size)
-    self.predictions[model_name] = prediction_scores
+  def evaluate(self, model, X_test, y_test, batch_size=128, title='', model_name='',
+               plot=True, training_seconds=None):
+    model.predict(X_test[:min(batch_size, len(X_test))], batch_size=batch_size,
+                  verbose=0)
+    inference_started = time.perf_counter()
+    prediction_scores = model.predict(X_test, batch_size=batch_size, verbose=0)
+    inference_seconds = time.perf_counter() - inference_started
     prediction = np.argmax(prediction_scores, axis=1)
+    self.predictions[model_name] = prediction
+    self.probabilities[model_name] = prediction_scores
     if plot:
       print()
       print('1) Plot ROC Curve...')
@@ -140,10 +155,19 @@ class Train_Evaluate_Deep():
         y_test, prediction, labels=CLASS_LABELS, target_names=CLASS_NAMES,
         output_dict=True, zero_division=0)
     self.results[model_name] = report
-    print()
-    matrix = confusion_matrix(y_test, prediction, labels=CLASS_LABELS)
-    plot_confusion_matrix(matrix, title=title, class_names=CLASS_NAMES)
-    print()
+    self.performance[model_name] = {
+        'training_seconds': training_seconds,
+        'inference_seconds': inference_seconds,
+        'inference_ms_per_window': 1000 * inference_seconds / max(len(X_test), 1),
+        'model_size_bytes': int(sum(np.asarray(weight).nbytes for weight in model.get_weights())),
+        'parameter_count': int(model.count_params()),
+        'probability_classes': [0, 1, 2],
+    }
+    if plot:
+      print()
+      matrix = confusion_matrix(y_test, prediction, labels=CLASS_LABELS)
+      plot_confusion_matrix(matrix, title=title, class_names=CLASS_NAMES)
+      print()
     return prediction
 
   def plot_learning_curves(self, history):
