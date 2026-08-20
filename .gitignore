@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Local datasets and generated experiment artifacts
+data/
+artifacts/
